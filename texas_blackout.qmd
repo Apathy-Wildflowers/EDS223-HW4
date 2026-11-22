@@ -1,0 +1,34 @@
+
+
+```{r}
+install.packages("rpart")
+install.packages("rpart.plot")
+```
+
+Load Packages
+```{r}
+library(sf) # vector data
+library(terra) # raster data
+library(here) # file path management
+library(tidyverse)
+library(rpart) # recursive partitioning and regression trees
+library(rpart.plot) # plotting for rpart
+library(tmap) # map making
+```
+
+
+```{r}
+NightLights2021_02_07_Tile5 <- rast("data/VNP46A1/VNP46A1.A2021038.h08v05.001.2021039064328.tif")
+
+NightLights2021_02_07_Tile6 <- rast("data/VNP46A1/VNP46A1.A2021038.h08v06.001.2021039064329.tif")
+
+NightLights2021_02_16_Tile5 <- rast("data/VNP46A1/VNP46A1.A2021047.h08v05.001.2021048091106.tif")
+
+NightLights2021_02_16_Tile6 <- rast("data/VNP46A1/VNP46A1.A2021047.h08v06.001.2021048091105.tif")
+
+NightLights2021_02_07 <- merge(NightLights2021_02_07_Tile5, NightLights2021_02_07_Tile6)
+
+NightLights2021_02_16 <- merge(NightLights2021_02_16_Tile5, NightLights2021_02_16_Tile6)
+
+NightLightChange <- 
+```
