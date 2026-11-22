@@ -16,7 +16,7 @@ library(rpart.plot) # plotting for rpart
 library(tmap) # map making
 ```
 
-
+Create Night Light Change raster
 ```{r}
 NightLights2021_02_07_Tile5 <- rast("data/VNP46A1/VNP46A1.A2021038.h08v05.001.2021039064328.tif")
 
@@ -30,5 +30,54 @@ NightLights2021_02_07 <- merge(NightLights2021_02_07_Tile5, NightLights2021_02_0
 
 NightLights2021_02_16 <- merge(NightLights2021_02_16_Tile5, NightLights2021_02_16_Tile6)
 
-NightLightChange <- 
+NightLightChange <- abs(NightLights2021_02_07 - NightLights2021_02_16)
+```
+
+Reclassify night light change raster to binary
+```{r}
+#Anything more than or equal to 200 nW cm-2sr-1 change is 1, other is 0
+NightLightChange <- NightLightChange >= 200
+
+#Change all 0 values to NA
+NightLightChange[NightLightChange < 1] <- NA
+```
+
+Vectorize blackout mask
+```{r}
+NightLightChangeVector <- as.polygons(NightLightChange, dissolve = TRUE, values = TRUE)
+
+NightLightChangeVector <- st_as_sf(NightLightChangeVector)
+
+NightLightChangeVector <- st_make_valid(NightLightChangeVector)
+```
+
+
+Crop
+```{r}
+#Create bounding box
+bbox <- st_bbox(c(xmin = -96.5, ymin = 29, xmax = -94.5, ymax = 30.5), crs = 'EPSG:3083')
+
+# Change crs of NightLightChangeVector
+NightLightChangeVector <- st_transform(NightLightChangeVector, crs = 'EPSG:3083')
+
+NightLightCropped <- st_crop(NightLightChangeVector, bbox)
+```
+
+Identify areas within 200m of all highways
+```{r}
+# Read in buildings data
+buildings <- st_read("data/gis_osm_buildings_a_free_1.gpkg", layer = "gis_osm_buildings_a_free_1")
+
+# Read in roads data
+roads <- st_read("data/gis_osm_roads_free_1.gpkg", layer = "gis_osm_roads_free_1")
+```
+
+
+```{r}
+#Create 200 m buffer around roads
+roads_buffer_200m = st_buffer(roads, dist = 200)
+
+roads_buffer_200m <- st_union(roads_buffer_200m)
+
+#
 ```
