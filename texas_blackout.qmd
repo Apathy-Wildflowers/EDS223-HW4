@@ -14,70 +14,188 @@ library(tidyverse)
 library(rpart) # recursive partitioning and regression trees
 library(rpart.plot) # plotting for rpart
 library(tmap) # map making
+library(stars)
+library(kableExtra)
 ```
 
 Create Night Light Change raster
 ```{r}
-NightLights2021_02_07_Tile5 <- rast("data/VNP46A1/VNP46A1.A2021038.h08v05.001.2021039064328.tif")
+NightLights2021_02_07_Tile5 <- read_stars(here("data","VNP46A1","VNP46A1.A2021038.h08v05.001.2021039064328.tif"))
 
-NightLights2021_02_07_Tile6 <- rast("data/VNP46A1/VNP46A1.A2021038.h08v06.001.2021039064329.tif")
+NightLights2021_02_07_Tile6 <- read_stars(here("data","VNP46A1","VNP46A1.A2021038.h08v06.001.2021039064329.tif"))
 
-NightLights2021_02_16_Tile5 <- rast("data/VNP46A1/VNP46A1.A2021047.h08v05.001.2021048091106.tif")
+NightLights2021_02_16_Tile5 <- read_stars(here("data","VNP46A1","VNP46A1.A2021047.h08v05.001.2021048091106.tif"))
 
-NightLights2021_02_16_Tile6 <- rast("data/VNP46A1/VNP46A1.A2021047.h08v06.001.2021048091105.tif")
+NightLights2021_02_16_Tile6 <- read_stars(here("data","VNP46A1","VNP46A1.A2021047.h08v06.001.2021048091105.tif"))
 
-NightLights2021_02_07 <- merge(NightLights2021_02_07_Tile5, NightLights2021_02_07_Tile6)
+NightLights2021_02_07 <- st_mosaic(NightLights2021_02_07_Tile5, NightLights2021_02_07_Tile6)
 
-NightLights2021_02_16 <- merge(NightLights2021_02_16_Tile5, NightLights2021_02_16_Tile6)
+NightLights2021_02_16 <- st_mosaic(NightLights2021_02_16_Tile5, NightLights2021_02_16_Tile6)
+```
 
-NightLightChange <- abs(NightLights2021_02_07 - NightLights2021_02_16)
+Boundingbox wrangling for 02_16 and 02_07
+
+```{r}
+#Create bounding box
+bbox <- st_bbox(c(xmin = -96.5, ymin = 29, xmax = -94.5, ymax = 30.5), crs = st_crs(NightLights2021_02_16))
+
+#Crop pre and post storm
+lights_07 <- st_crop(NightLights2021_02_07, bbox)
+lights_16 <- st_crop(NightLights2021_02_16, bbox)
+
+#Mask layers that are not 0-1000 as NA
+masked_houston_07 <- lights_07
+masked_houston_07[(masked_houston_07 > 1000) | (masked_houston_07 <= 0)] <- NA
+
+masked_houston_16 <- lights_16
+masked_houston_16[(masked_houston_16 > 1000) | (masked_houston_16 <= 0)] <- NA
+
+# Combine pre and post storm layers
+combined_mask <- c(masked_houston_07, masked_houston_16)
+
+# Rename layers
+names(combined_mask) <- c(
+  "February 7, 2021", "February 16, 2021"
+)
+```
+
+Map of light intensities
+```{r}
+# Map the combined raster to show lights pre and post storm
+tm_shape(combined_mask)+
+  tm_raster(
+    col.legend = tm_legend(
+      title = "Light Intensity (nW cm^2 sr^1)",
+      orientation = "landscape",
+      title.size = 0.8,
+      text.size = 0.8
+    ),
+    col.scale = tm_scale(values = "inferno")
+  ) +
+    tm_facets(ncol = 2, free.scales = FALSE) +
+    tm_graticules(
+      col = "white",
+      lwd = 0.3,
+      alpha = 0.2,
+      labels.size = 0.5,
+      labels.pos = c("left","bottom"),
+      n.x = 4,
+      n.y = 4
+    ) +
+      tm_layout(
+        scale = 0.8,
+        legend.position = tm_pos_out("center", "bottom"),
+        legend.frame = TRUE,
+        panels.labels = c(
+          "February 7, 2021 (Pre-Storm)",
+          "February 16, 2021 (Post-Storm)"
+        ),
+        panel.label.size = 1.0
+      ) +
+      tm_title("Nighttime Light Intensity in Houston Pre and Post 2021 Winter Storm")
 ```
 
 Reclassify night light change raster to binary
 ```{r}
-#Anything more than or equal to 200 nW cm-2sr-1 change is 1, other is 0
-NightLightChange <- NightLightChange >= 200
+# Find change in night lights from the 16th to the 7th
+NightLightChange <- rast(NightLights2021_02_16) - rast(NightLights2021_02_07)
 
-#Change all 0 values to NA
-NightLightChange[NightLightChange < 1] <- NA
-```
+#Reclassification matrix using 200 threshold
+reclass_matrix <- matrix(c(-Inf, 200, NA,
+                              200, Inf, 1),
+                              ncol = 3, byrow = TRUE)
 
-Vectorize blackout mask
-```{r}
-NightLightChangeVector <- as.polygons(NightLightChange, dissolve = TRUE, values = TRUE)
+#Feed reclass matrix into nightlights
+NightLightReclass <- classify(NightLightChange, rcl = reclass_matrix)
 
-NightLightChangeVector <- st_as_sf(NightLightChangeVector)
+#Vectorize night lights
+NightLightReclass <- st_as_stars(NightLightReclass)
 
-NightLightChangeVector <- st_make_valid(NightLightChangeVector)
-```
+NightLightReclass <- st_as_sf(NightLightReclass)
 
+NightLightReclass <- st_make_valid(NightLightReclass)
 
-Crop
-```{r}
-#Create bounding box
-bbox <- st_bbox(c(xmin = -96.5, ymin = 29, xmax = -94.5, ymax = 30.5), crs = 'EPSG:3083')
+#Crop lights to bounding box
+houston_lights <- st_crop(NightLightReclass, bbox)
 
-# Change crs of NightLightChangeVector
-NightLightChangeVector <- st_transform(NightLightChangeVector, crs = 'EPSG:3083')
-
-NightLightCropped <- st_crop(NightLightChangeVector, bbox)
+# Reproject to CRS 3083
+houston_lights <- st_transform(houston_lights, crs = 'EPSG:3083')
 ```
 
 Identify areas within 200m of all highways
 ```{r}
 # Read in buildings data
-buildings <- st_read("data/gis_osm_buildings_a_free_1.gpkg", layer = "gis_osm_buildings_a_free_1")
+buildings <- sf::st_read(here::here(
+  "data", "gis_osm_buildings_a_free_1.gpkg"), query = "SELECT *
+FROM gis_osm_buildings_a_free_1
+WHERE (type IS NULL AND name IS NULL)
+OR type IN ('residential', 'apartments', 'house', 'static_caravan', 'detached')")
 
 # Read in roads data
-roads <- st_read("data/gis_osm_roads_free_1.gpkg", layer = "gis_osm_roads_free_1")
+roads <- sf::st_read(here::here(
+  "data", "gis_osm_roads_free_1.gpkg"), query = "SELECT * FROM gis_osm_roads_free_1 WHERE fclass='motorway'")
 ```
 
+Create 200m buffer around roads
+```{r}
+# Project roads to CRS 3083
+roads <- st_transform(roads, crs = 3083)
+
+#Create 200 m buffer around roads
+roads_buffer_200m = st_union(st_buffer(roads, dist = 200))
+
+non_hw_lights <- st_difference(houston_lights, roads_buffer_200m)
+```
+
+# Identify homes impacted by blacklouts
+```{r}
+# Project buildings to standard 3083 CRS
+buildings <- st_transform(buildings, crs = 3083)
+
+# Identify buildings in blackout areas
+blackout_homes <- st_intersection(buildings, non_hw_lights)
+```
 
 ```{r}
-#Create 200 m buffer around roads
-roads_buffer_200m = st_buffer(roads, dist = 200)
+#Filter homes to blackout homes
+homes_in_blackout <- buildings |> 
+  st_filter(non_hw_lights)
 
-roads_buffer_200m <- st_union(roads_buffer_200m)
-
-#
+#Number of homes affected by blackout
+n_homes_blackout <- nrow(homes_in_blackout)
 ```
+
+# Map of homes likely affected by blackouts
+```{r}
+#Create points for homes
+all_homes <- st_centroid(buildings)
+unaffected_homes <- all_homes[!all_homes$osm_id %in% blackout_homes$osm_id, ]
+affected_homes <- st_centroid(blackout_homes)
+```
+
+Final Map
+
+```{r}
+tm_basemap("OpenStreetMap") +
+  tm_shape(roads) +
+  tm_lines(col = "orange3", lwd = 0.8) +
+  tm_shape(unaffected_homes) +
+  tm_dots(fill = "green", size = 0.01, fill_alpha = 0.3) +
+  tm_shape(affected_homes) +
+  tm_dots(fill = "red", size = 0.01, fill_alpha = 0.5) +
+  tm_add_legend(
+    type = "symbols",
+    labels = c("Blackout", "No Blackout"),
+    fill = c("red","green"),
+    shape = 21,
+    size = 0.6,
+    title = "Homes"
+  ) +
+    tm_title("Homes likely affected by blackout from February 2021 Winter Storm (Houston)") +
+    tm_legend(type = "lines", labels = "Highways", col = "orange3", lwd = 0.8) +
+    tm_scalebar(position = c("right","bottom"), text.size = 0.5) +
+    tm_compass(position = c("right","top"))
+```
+
+# Reflection
+The map shows homes likely affected by the 2021 winter storm in Houston, Texas. In our data wrangling and analysis, the basis for experiencing a blackout was a drop of more than 200 nW cm-2sr-1, but this might exclude homes that did experience did have blackouts without meeting this threshold of a drop. Cloud cover also limits our data to just 2 days that were before and after the storm, but can not give us the days immediately before or afterwards. We are also limited by the raster resolution, and if it was higher resolution the visual representation of the homes would also be better representative.
